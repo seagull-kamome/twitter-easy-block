@@ -9,25 +9,24 @@
 // @match       https://twitter.com/*
 // @match       https://mobile.twitter.com/*
 // @match       https://tweetdeck.twitter.com/*
-// @resource    REGEXP_NONJA https://raw.githubusercontent.com/seagull-kamome/unicode-regexp/master/regexp_non_ja.txt
+// @resource    REGEXP_ZH https://raw.githubusercontent.com/seagull-kamome/unicode-regexp/master/regexp_zh.txt
 // @require     https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js
-// @grant       GM_cookie
 // @grant       GM_getResourceText
 // ==/UserScript==
 (_ => {
   'use strict';
 
-  const CHECK_CYCLE_MS = 100;
-  const nonja_regexp_str = GM_getResourceText('REGEXP_NONJA');
-  const nonja_regexp = (nonja_regexp_str === '')? null : new RegExp(GM_getResourceText('REGEXP_NONJA'), 'u');
+  const regexp_zh_str = GM_getResourceText('REGEXP_ZH');
+  const regexp_zh = (regexp_zh_str === '')? null : new RegExp(GM_getResourceText('REGEXP_ZH'), 'u');
 
   const TROLL_WORDS_REGEXP = new RegExp(
-    'nmsl|にますら|ニマスラ'
+    'nmsl|[にニ][まマ][すス][らラ]|[にニ][まマ][びビ]'
     + '|マホRPGは今これをやってるよ|参戦ID.*参加者募集！'
     + '|#(?:桐生ココ引退)'
     , 'iu');
   const TROLL_SCREENNAME = /^(?:Jejus)$/iu;
-  const TAGS_LIMIT = 4;
+  const HASHTAGS_LIMIT = 7;
+  const NUM_BUDDA_FACES = 3;
 
   /* ********************************************************************** */
 
@@ -100,20 +99,21 @@
 
     let author_info = get_account_info(author_id);
     if (author_info.typ == 'TROLL') { hide_tweet(x); return; }
-    
+
     // Get message.
     const msg = elm.querySelector(':scope > div:nth-of-type(2) div[lang]');
     const lang = msg.getAttribute('lang') || '';
     const message = (msg? msg.innerText : '').replace(/(?:\r?\n|\s)+/ig, ' ');
 
-    
     if (lang == 'zh' || lang == 'kr'
-    || (nonja_regexp !== null && nonja_regexp.test(author_name + message))
-    || TROLL_SCREENNAME.test(author_name) ) {
+      || (regexp_zh !== null && regexp_zh.test(author_name + message))
+      || TROLL_SCREENNAME.test(author_name) ) {
       hide_tweet(x);
       author_info.typ = 'TROLL';
-    } else if (TROLL_WORDS_REGEXP.test(author_name + message)) {
+    } else if (TROLL_WORDS_REGEXP.test(author_name + message)
+      || msg.querySelectorAll('a[href^=\'/hashtag/\']').length > HASHTAGS_LIMIT) {
       hide_tweet(x);
+      if (++author_info.count >= NUM_BUDDA_FACES) { author_info.typ = 'TROLL'; }
     }
   };
 
