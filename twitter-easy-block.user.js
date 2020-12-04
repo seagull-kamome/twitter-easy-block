@@ -10,6 +10,7 @@
 // @match       https://mobile.twitter.com/*
 // @match       https://tweetdeck.twitter.com/*
 // @resource    REGEXP_ZH https://raw.githubusercontent.com/seagull-kamome/unicode-regexp/master/regexp_zh.txt
+// @resource    REGEXP_KR https://raw.githubusercontent.com/seagull-kamome/unicode-regexp/master/regexp_zhkrxt
 // @require     https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js
 // @grant       GM_getResourceText
 // ==/UserScript==
@@ -17,7 +18,9 @@
   'use strict';
 
   const regexp_zh_str = GM_getResourceText('REGEXP_ZH');
-  const regexp_zh = (regexp_zh_str === '')? null : new RegExp(GM_getResourceText('REGEXP_ZH'), 'u');
+  const regexp_zh = (regexp_zh_str === '')? null : new RegExp(regexp_zh_str, 'u');
+  const regexp_kr_str = GM_getResourceText('REGEXP_KR');
+  const regexp_kr = (regexp_kr_str === '')? null : new RegExp(regexp_kr_str, 'u');
 
   const TROLL_WORDS_REGEXP = new RegExp(
     'nmsl|[にニ][まマ][すス][らラ]|[にニ][まマ][びビ]'
@@ -45,29 +48,34 @@
   };
 
 
-  /*
-  const get_cookie = cname => {
-  const name = cname + '='
-  const ca = document.cookie.split(';')
-  for (let i = 0; i < ca.length; ++i) {
-  let c = ca[i].trim()
-  if (c.indexOf(name) === 0) {
-  return c.substring(name.length, c.length)
+
+  /* ********************************************************************** */
+
+  {
+    const get_cookie = k => {
+      const kk = k + '=';
+      const y = document.cookie.split(';').find(x => x.indexOf(kk) == 0);
+      return y? y.substring(kk.length, y.length) : ''; };
+    const ajax = axios.create({
+      baseURL: 'https://api.twitter.com',
+      withCredentials: true,
+      headers:
+      { 'Authorization': 'Bearer xxxxxxxxxxxx'
+        , 'X-Twitter-Auth-Type': 'OAuth2Session'
+        , 'X-Twitter-Active-User': 'yes'
+        , 'X-Csrf-Token': get_cookie('ct0') }  });
+    const blocker_cycle = _ => {
+      Object.keys(accounts)
+        .filter(k => accounts[k].typ == 'TROLL')
+        .forEach(k => ajax.post('/1.1/blocks/create.json'
+          , { user_id: id, skip_status: 1 }
+          , { headers: {
+            'Content-Type': 'application/x-www-form-urlencoded' } }) );
+      window.setTimeout(blocker_cycle, 60000); };
+
+    // window.setTimeout(blocker_cycle, 60000);
   }
-  }
-  return ''
-  }
-  const ajax = axios.create({
-  baseURL: 'https://api.twitter.com',
-  withCredentials: true,
-  headers: {
-  'Authorization': 'Bearer xxxxxxxxxxxx',
-  'X-Twitter-Auth-Type': 'OAuth2Session',
-  'X-Twitter-Active-User': 'yes',
-  'X-Csrf-Token': get_cookie('ct0')
-  }
-  });
-  */
+
 
   /* ********************************************************************** */
 
@@ -105,22 +113,22 @@
     const lang = msg.getAttribute('lang') || '';
     const message = (msg? msg.innerText : '').replace(/(?:\r?\n|\s)+/ig, ' ');
 
-    if (lang == 'zh' || lang == 'kr'
-      || (regexp_zh !== null && regexp_zh.test(author_name + message))
-      || TROLL_SCREENNAME.test(author_name) ) {
+    if (TROLL_SCREENNAME.test(author_name) ) {
       hide_tweet(x);
       author_info.typ = 'TROLL';
     } else if (TROLL_WORDS_REGEXP.test(author_name + message)
-      || msg.querySelectorAll('a[href^=\'/hashtag/\']').length > HASHTAGS_LIMIT) {
+            || msg.querySelectorAll('a[href^=\'/hashtag/\']').length > HASHTAGS_LIMIT) {
       hide_tweet(x);
       if (++author_info.count >= NUM_BUDDA_FACES) { author_info.typ = 'TROLL'; }
+    } else if (lang == 'zh' || lang == 'kr'
+            || (regexp_zh !== null && regexp_zh.test(author_name + message))
+            || (regexp_kr !== null && regexp_kr.test(author_name + message)) ) {
+      hide_tweet(x);
     }
   };
 
-  const watch_cycle = twmain => {
-    twmain.querySelectorAll('article:not([visibility=\'hidden\'])')
-      .forEach(x => { detector(x); });
-  };
+
+
 
   /* ********************************************************************** */
   const install_observer = _ => {
@@ -129,7 +137,28 @@
       window.setTimeout(install_observer, 100);
       return ;
     }
-    (new MutationObserver(_ => watch_cycle(twmain)))
+
+
+    var last_processed_time = new Date().getTime() - 1000;
+    var respawn_scheduled = false;
+    const watch_cycle = _ => {
+      if (respawn_scheduled) return ;
+
+      const t = new Date().getTime();
+      if (t < last_processed_time + 200) {
+        respawn_scheduled = true;
+        window.setTimeout(_ => { respawn_scheduled = false; watch_cycle(); },
+          last_processed_time + 200 - t);
+        return ;
+      }
+      last_processed_time = t;
+
+      twmain.querySelectorAll('article:not([visibility=\'hidden\'])')
+        .forEach(x => { detector(x); });
+    };
+
+
+    (new MutationObserver(_ => watch_cycle()))
       .observe(twmain, { childList: true, subtree: true });
   };
   install_observer();
