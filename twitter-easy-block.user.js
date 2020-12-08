@@ -9,28 +9,32 @@
 // @match       https://twitter.com/*
 // @match       https://mobile.twitter.com/*
 // @match       https://tweetdeck.twitter.com/*
-// @resource    REGEXP_ZH https://raw.githubusercontent.com/seagull-kamome/unicode-regexp/master/regexp_zh.txt
 // @require     https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js
 // @require     https://cdn.jsdelivr.net/npm/qs/dist/qs.min.js
+// @require     https://raw.githubusercontent.com/seagull-kamome/unicode-regexp/master/regexp_zh.js
+// @require     https://raw.githubusercontent.com/seagull-kamome/unicode-regexp/master/regexp_kr.js
 // @grant       GM_getResourceText
 // @grant       GM_registerMenuCommand
+// @grant       GM_notification
 // ==/UserScript==
 (_ => {
   'use strict';
 
-  const regexp_zh_str = GM_getResourceText('REGEXP_ZH');
-  const regexp_zh = (regexp_zh_str === '')? null : new RegExp(regexp_zh_str, 'u');
-  const regexp_kr =  /[\u{ac00}-\u{afff}]/u;
-
   const TROLL_WORDS_REGEXP = new RegExp(
     'nmsl|[にニ][まマ][すス][らラ]|[にニ][まマ][びビ]'
     + '|マホRPGは今これをやってるよ|参戦ID.*参加者募集！'
+    + 'sdb\s+test'
     + '|#(?:桐生ココ(?:引退|政治系Vtuber|はRCEP締結の元凶))'
     , 'iu');
   const TROLL_NICKNAME = new RegExp(
    '^(?:Jesus$|COVER豬式會社)'
    + '|エバーライフ|バッタ殺|は引退しろ'
    , 'iu');
+  const SAFE_NICKNAME_LIST =
+    [ [ /^桐生ココ.*@ホロライブ4期生/, 'kiryucoco' ]
+    , [ /^Kureiji Ollie.*@ホロライブID/, 'kureijiollie' ]
+    , [ /^友人A.*ホロライブ裏方/ , 'achan_UGA' ]
+    , [ /^ホロライブプロダクション/, 'hololivetv' ] ];
   const HASHTAGS_LIMIT = 7;
   const NUM_BUDDA_FACES = 3;
 
@@ -66,7 +70,7 @@
       'X-Twitter-Auth-Type': 'OAuth2Session',
       'X-Twitter-Active-User': 'yes',
       'X-Csrf-Token': get_cookie('ct0') }  });
-  const block_account = async id => {
+  const block_account = id => {
     get_account_info(id).typ = 'BLOCKED';
     ajax.post('/1.1/blocks/create.json',
       Qs.stringify({ screen_name: id, skip_status: true }),
@@ -80,7 +84,22 @@
   GM_registerMenuCommand('Block trolls',
     _ => Object.keys(accounts).filter(k => accounts[k].typ === 'TROLL')
            .forEach(block_account));
-
+  GM_registerMenuCommand('Download blocklist',
+    _ => {
+      let xs = new Array();
+      const f = c =>
+        ajax.get(`/1.1/blocks/list.json?include_entities=false&skip_status=true&cursor=${c}`)
+          .then(r => {
+            xs.push(r.data.users.map(x => [x.id, x.screen_name]));
+            if (r.data.next_cursor > 0) {
+              window.setTimeout(f, 70000, c);
+              return ;
+            }
+            const b = new Blob(xs.flat(2).join('\n'), { type: 'text/plain' });
+            window.optn(URL.createObjectURL(b)); })
+          .catch(e => { console.log(e); GM_notification('Failed to download your block list.'); });
+      f(-1); });
+      
 
   /* ********************************************************************** */
 
@@ -105,29 +124,31 @@
     let author_info = get_account_info(author_id);
     article.setAttribute('tweb-processed', 'true');
     const hide_tweet = b => {
-      if (b) author_info.typ = 'TROLL';
+      if (b) {
+        console.log('Found troll: ' + author_name + '/' + author_id);
+        author_info.typ = 'TROLL';
+      }
       const c = article.parentNode.parentNode;
       c.style.display = 'none';
-      c.style.visibility = 'hidden';
-      /* article.parentNode.remove(article); */ /* NOTE: removing will error occurs */ };
+      c.style.visibility = 'hidden'; };
 
     if (author_info.typ === 'TROLL' || author_info.typ === 'BLOCKED') {
       hide_tweet(false);
+    } else if (TROLL_NICKNAME.test(author_name) || TROLL_WORDS_REGEXP.test(author_name)
+     || SAFE_NICKNAME_LIST.find(x => x[0].test(author_name) && x[1] != author_id) ) {
+      hide_tweet(true);
     } else {
       // Get message.
       const msg = elm.querySelector(':scope > div:nth-of-type(2) div[lang]');
       const lang = msg.getAttribute('lang') || '';
       const message = (msg? msg.innerText : '').replace(/(?:\r?\n|\s)+/ig, ' ');
 
-      if (TROLL_NICKNAME.test(author_name)
-        || TROLL_WORDS_REGEXP.test(author_name)) {
-        hide_tweet(true);
-      } else if (TROLL_WORDS_REGEXP.test(message)
+      if (TROLL_WORDS_REGEXP.test(message)
               || msg.querySelectorAll('a[href^=\'/hashtag/\']').length > HASHTAGS_LIMIT) {
-        hide_tweet(++author_info.count > NUM_BUDDA_FACES);
+        hide_tweet(++author_info.count >= NUM_BUDDA_FACES);
       } else if (lang == 'zh' || lang == 'kr'
-              || (regexp_zh !== null && regexp_zh.test(author_name + message))
-              || (regexp_kr !== null && regexp_kr.test(author_name + message)) ) {
+              || (unicode_regexp_zh !== null && unicode_regexp_zh.test(author_name + message))
+              || (unicode_regexp_kr !== null && unicode_regexp_kr.test(author_name + message)) ) {
         hide_tweet(false);
       }
     }
